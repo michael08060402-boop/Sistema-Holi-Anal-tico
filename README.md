@@ -68,25 +68,4 @@ Streamlit Dashboard
 | Machine Learning | Facebook Prophet |
 | Reportes | ReportLab + Matplotlib |
 
-## Instalación
-
-```bash
-# 1. Clonar el repositorio
-git clone https://github.com/TU_USUARIO/sistema-holi-ua.git
-cd sistema-holi-ua
-
-# 2. Crear entorno virtual
-python -m venv venv
-.\venv\Scripts\Activate.ps1   # Windows
-# source venv/bin/activate    # macOS / Linux
-
-# 3. Instalar dependencias
-pip install -r requirements.txt
-
-# 4. Configurar credenciales
-# Crear archivo .env con:
-# DATABASE_URL=postgresql://usuario:contraseña@host/neondb?sslmode=require
-
-# 5. Ejecutar
-python -m streamlit run app.py
 
