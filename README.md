@@ -74,22 +74,4 @@ pip install -r requirements.txt
 
 # 5. Ejecutar
 python -m streamlit run app.py
-```
 
-## Variables de entorno
-
-Crear un archivo `.env` en la raíz del proyecto:
-
-```
-DATABASE_URL=postgresql://...
-```
-
-> El archivo `.env` está en `.gitignore` y nunca debe subirse al repositorio.
-
-## Equipo
-
-- Quispe Cabrera, Rosa
-- Fernandez Caceres, Dayssy
-- Bada Ccapia, Meier
-- Roman Lugo, Michael
-- Bazán Mendoza, Alejandro
