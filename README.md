@@ -2,13 +2,9 @@
 
 Sistema de análisis predictivo de ventas para Supermercados Holi — cadena con 5 sedes en Lima, Perú.
 
-![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python&logoColor=white)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.30+-red?logo=streamlit&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Neon-green?logo=postgresql&logoColor=white)
-![Prophet](https://img.shields.io/badge/ML-Prophet-orange)
-
 ---
-
+## Demo Página: https://sistemaholianaticodeventas.streamlit.app
+---
 ## Descripción
 
 Dashboard interactivo que integra un pipeline completo de Big Data:
