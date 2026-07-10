@@ -6,12 +6,17 @@ Sistema de análisis predictivo de ventas para Supermercados Holi — cadena con
 ## Demo Página: https://sistemaholianaticodeventas.streamlit.app
 ---
 
-## Screenshots
-
-<img width="1347" height="962" alt="Captura de pantalla 2026-07-10 172959" src="https://github.com/user-attachments/assets/23fc489f-9ce1-411c-ad7c-677185335943" />
-<img width="1487" height="810" alt="Captura de pantalla 2026-07-10 172919" src="https://github.com/user-attachments/assets/9b7657d0-51c3-4c75-9687-da5979f49192" />
-<img width="1817" height="792" alt="Captura de pantalla 2026-07-10 172909" src="https://github.com/user-attachments/assets/6f70a7e1-3aad-4e83-9d77-116bfeea8196" />
+## Página Principal
 <img width="1867" height="812" alt="Captura de pantalla 2026-07-10 172734" src="https://github.com/user-attachments/assets/3d20fbf1-d55b-47c0-91c2-d4445bf71d2d" />
+
+## Preddición con Prophet
+<img width="1817" height="792" alt="Captura de pantalla 2026-07-10 172909" src="https://github.com/user-attachments/assets/6f70a7e1-3aad-4e83-9d77-116bfeea8196" />
+
+## Resúmen de Predicción
+<img width="1487" height="810" alt="Captura de pantalla 2026-07-10 172919" src="https://github.com/user-attachments/assets/9b7657d0-51c3-4c75-9687-da5979f49192" />
+
+## Generador de PDF
+<img width="1347" height="962" alt="Captura de pantalla 2026-07-10 172959" src="https://github.com/user-attachments/assets/23fc489f-9ce1-411c-ad7c-677185335943" />
 
 
 ---
