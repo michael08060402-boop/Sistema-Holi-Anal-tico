@@ -1030,14 +1030,14 @@ elif menu == "📋  Análisis ABC":
                      f"{cat_c['Porcentaje'].iloc[0]:.1f}% ventas")
 
     fig = px.bar(
-        abc.head(30),
+        abc,
         x="PRODUCTO", y="TOTAL_VENTA",
         color="Clasificación",
-        title="Top 30 Productos con Clasificación ABC",
+        title="Clasificación ABC — Todos los productos",
         color_discrete_map={"A": "#5E2638", "B": "#FF9E0F", "C": "#FFCC99"},
     )
     fig.update_xaxes(tickangle=-45)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(aplicar_tema(fig), use_container_width=True)
 
     st.markdown("#### Tabla Completa")
     st.dataframe(abc, use_container_width=True, hide_index=True)
