@@ -27,13 +27,18 @@ Sistema de análisis predictivo de ventas para Supermercados Holi — cadena con
 
 ## Descripción
 
-Dashboard interactivo que integra un pipeline completo de Big Data:
+Pipeline completo de Big Data para Supermercados Holi: desde la carga de datos crudos en Excel hasta predicción de demanda con Machine Learning, persistencia en la nube y generación de reportes ejecutivos.
 
-- **ETL** — limpieza y normalización de datos crudos de ventas
-- **Star Schema** — esquema dimensional en la nube (Neon PostgreSQL)
-- **Análisis** — KPIs, rankings, clasificación ABC y rotación de inventario
-- **Predicción** — modelo Prophet para forecast de demanda
-- **Reportes** — exportación a PDF ejecutivo con gráficos
+### Funcionalidades principales
+
+- **Carga dinámica de Excel** — cualquier dataset en formato Holi se valida, limpia y analiza automáticamente
+- **ETL automático** — detecta y corrige duplicados, nulos, fechas inválidas, categorías mal escritas y cantidades negativas
+- **Descarga de Excel limpio** — exporta el dataset procesado tras el ETL
+- **Star Schema en la nube** — persiste los datos limpios en Neon PostgreSQL con inserción masiva (bulk insert)
+- **Historial de cargas** — registra cada archivo cargado; permite recargar cualquier dataset anterior al dashboard con un clic
+- **KPIs y análisis** — ventas totales, ticket promedio, rankings, clasificación ABC y rotación de inventario
+- **Predicción con IA** — modelo Prophet para forecast de demanda a 7–90 días con intervalo de confianza al 95%
+- **Reporte ejecutivo PDF** — con gráficos de productos, sucursales y clasificación ABC
 
 ## Arquitectura
 
@@ -42,24 +47,32 @@ Excel (datos crudos)
        │
        ▼
    ETL (Python / Pandas)
+   ├── Eliminación de duplicados
+   ├── Imputación de nulos
+   ├── Normalización de categorías
+   └── Validación de fechas y cantidades
+       │
+       ├──► Excel limpio (descarga directa)
        │
        ▼
-Neon PostgreSQL (star schema)
+Neon PostgreSQL — Star Schema
   ├── dim_fecha
   ├── dim_sucursal
   ├── dim_producto
   ├── dim_categoria
   ├── dim_metodo_pago
-  └── fact_ventas
+  ├── fact_ventas
+  └── historial_cargas
        │
        ▼
 Streamlit Dashboard
-  ├── Vista General
-  ├── Rankings
-  ├── Análisis ABC
-  ├── Rotación
+  ├── Vista General (evolución, sucursales, métodos de pago)
+  ├── Rankings (top productos, categorías)
+  ├── Análisis ABC (Pareto 80/20)
+  ├── Rotación de inventario
   ├── Predicción (Prophet)
-  └── Reportes PDF
+  ├── Reportes PDF
+  └── Historial de cargas
 ```
 
 ## Stack tecnológico
@@ -68,36 +81,9 @@ Streamlit Dashboard
 |---|---|
 | Frontend | Streamlit + Plotly |
 | Backend / ETL | Python, Pandas, NumPy |
-| Base de datos | Neon PostgreSQL (cloud) |
+| Base de datos | Neon PostgreSQL (cloud, São Paulo) |
 | ORM / conexión | SQLAlchemy + psycopg2 |
+| Bulk insert | psycopg2 `execute_values` |
 | Machine Learning | Facebook Prophet |
 | Reportes | ReportLab + Matplotlib |
-
-## Instalación
-
-```bash
-# 1. Clonar el repositorio
-git clone https://github.com/michael08060402-boop/Sistema-Holi-Anal-tico.git
-cd Sistema-Holi-Anal-tico
-
-# 2. Crear entorno virtual
-python -m venv venv
-.\venv\Scripts\Activate.ps1   # Windows
-
-# 3. Instalar dependencias
-pip install -r requirements.txt
-
-# 4. Configurar credenciales — crear archivo .env con:
-# DATABASE_URL=postgresql://usuario:contraseña@host/neondb?sslmode=require
-
-# 5. Ejecutar
-python -m streamlit run app.py
-```
-
-## Equipo
-
-- Quispe Cabrera, Rosa
-- Fernandez Caceres, Dayssy
-- Bada Ccapia, Meier
-- Roman Lugo, Michael
-- Bazán Mendoza, Alejandro
+| Exportación | OpenPyXL (Excel limpio) |
