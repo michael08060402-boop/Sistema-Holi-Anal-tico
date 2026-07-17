@@ -9,7 +9,6 @@ warnings.filterwarnings("ignore")
 BACKGROUND_IMAGE_PATH = "assets/holi_fondo.png"
 LOGO_IMAGE_PATH       = "assets/holilogo.png"
 FAVICON_PATH          = "assets/pestaña.png"
-RUTA_SUCIO            = "data/VENTAS_HOLI_2025_SIN_ETL.xlsx"
 
 from modules.etl import diagnosticar_dataset, aplicar_etl
 from modules.analisis import (
@@ -22,7 +21,7 @@ from modules.prediccion import (
     obtener_prediccion_futura, resumen_prediccion,
 )
 from modules.reportes import generar_pdf_ejecutivo
-from modules.database import cargar_datos, guardar_en_neon, obtener_historial
+from modules.database import cargar_datos, guardar_en_neon, obtener_historial, cargar_datos_por_periodo
 
 
 def aplicar_tema(fig):
@@ -248,8 +247,13 @@ if logo_base64:
     )
 
 # ── CARGA DE DATOS ────────────────────────────────────────────────
-# El file_uploader se define aquí para que esté disponible
-# antes de que el resto del sidebar se construya
+if "df_neon" not in st.session_state:
+    st.session_state["df_neon"] = None
+if "fuente_neon" not in st.session_state:
+    st.session_state["fuente_neon"] = None
+if "historial_activo" not in st.session_state:
+    st.session_state["historial_activo"] = None
+
 _archivo = st.sidebar.file_uploader(
     "Cargar Excel de ventas",
     type=["xlsx", "xls"],
@@ -262,33 +266,41 @@ COLUMNAS_REQUERIDAS = {
     "STOCK_ACTUAL", "METODO_PAGO"
 }
 
-st.sidebar.markdown("<div class='nav-label'>Historial de cargas</div>", unsafe_allow_html=True)
-try:
-    _hist = obtener_historial()
-    if _hist.empty:
-        st.sidebar.caption("Sin cargas registradas aún.")
-    else:
-        for _, row in _hist.iterrows():
-            st.sidebar.markdown(f"""
-            <div class='sidebar-info' style='margin-bottom:6px'>
-              <div class='sidebar-info-row'>
-                <span class='sidebar-label'>Archivo</span>
-                <span class='sidebar-value' style='font-size:0.72rem'>{str(row['Archivo'])[:20]}</span>
-              </div>
-              <div class='sidebar-info-row'>
-                <span class='sidebar-label'>Registros</span>
-                <span class='sidebar-value'>{int(row['Registros nuevos']):,}</span>
-              </div>
-              <div class='sidebar-info-row'>
-                <span class='sidebar-label'>Período</span>
-                <span class='sidebar-value' style='font-size:0.72rem'>{str(row['Desde'])} → {str(row['Hasta'])}</span>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-except Exception:
-    st.sidebar.caption("No se pudo cargar el historial.")
+if _archivo is None and st.session_state["df_neon"] is None:
+    st.sidebar.markdown("<div class='nav-label'>Historial de cargas</div>", unsafe_allow_html=True)
+    try:
+        _hist = obtener_historial()
+        if _hist.empty:
+            st.sidebar.caption("Sin cargas registradas aún.")
+        else:
+            for _i, _hrow in _hist.iterrows():
+                st.sidebar.markdown(f"""
+                <div class='sidebar-info' style='margin-bottom:4px'>
+                  <div class='sidebar-info-row'>
+                    <span class='sidebar-label'>Archivo</span>
+                    <span class='sidebar-value' style='font-size:0.72rem'>{str(_hrow['Archivo'])[:20]}</span>
+                  </div>
+                  <div class='sidebar-info-row'>
+                    <span class='sidebar-label'>Registros</span>
+                    <span class='sidebar-value'>{int(_hrow['Registros nuevos']):,}</span>
+                  </div>
+                  <div class='sidebar-info-row'>
+                    <span class='sidebar-label'>Período</span>
+                    <span class='sidebar-value' style='font-size:0.72rem'>{str(_hrow['Desde'])} → {str(_hrow['Hasta'])}</span>
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.sidebar.button("Cargar estos datos", key=f"hist_{_i}", use_container_width=True):
+                    with st.spinner(f"Cargando {str(_hrow['Archivo'])[:20]}..."):
+                        _df_cargado = cargar_datos_por_periodo(_hrow["Desde"], _hrow["Hasta"])
+                    st.session_state["df_neon"] = _df_cargado
+                    st.session_state["fuente_neon"] = str(_hrow["Archivo"])
+                    st.session_state["historial_activo"] = str(_hrow["Archivo"])
+                    st.rerun()
+    except Exception:
+        st.sidebar.caption("No se pudo cargar el historial.")
 
-if _archivo is None:
+if _archivo is None and st.session_state["df_neon"] is None:
     st.markdown("""
     <div class='hero-card'>
       <div class='hero-title'>Holi <span>Intelligence</span> Platform</div>
@@ -346,25 +358,41 @@ if _archivo is None:
     st.info("Sube tu archivo Excel de ventas desde el panel izquierdo para comenzar.")
     st.stop()
 
-with st.spinner(f"Validando {_archivo.name}..."):
-    df_raw = pd.read_excel(_archivo, engine="openpyxl")
-    columnas_faltantes = COLUMNAS_REQUERIDAS - set(df_raw.columns.str.upper())
+df_sucio  = None
+_etl_log  = None
 
-if columnas_faltantes:
-    st.error(
-        f"El archivo **{_archivo.name}** no tiene el formato de Supermercados Holi. "
-        f"Columnas faltantes: `{', '.join(sorted(columnas_faltantes))}`"
-    )
-    st.info("El archivo debe contener: SUCURSAL, PRODUCTO, CATEGORIA, FECHA, CANTIDAD, PRECIO_UNITARIO, TOTAL_VENTA, STOCK_ACTUAL, METODO_PAGO")
-    st.stop()
+if _archivo is not None:
+    # Nuevo Excel subido — limpia historial activo
+    st.session_state["df_neon"]       = None
+    st.session_state["fuente_neon"]   = None
+    st.session_state["historial_activo"] = _archivo.name
 
-with st.spinner(f"Procesando {_archivo.name}..."):
-    df_sucio = df_raw.copy()
-    df_sucio.columns = df_sucio.columns.str.upper()
-    df, _etl_log = aplicar_etl(df_sucio)
-    df["FECHA"] = pd.to_datetime(df["FECHA"])
-_nombre = _archivo.name if len(_archivo.name) <= 18 else _archivo.name[:15] + "..."
-_fuente = f"Excel: {_nombre}"
+    with st.spinner(f"Validando {_archivo.name}..."):
+        df_raw = pd.read_excel(_archivo, engine="openpyxl")
+        columnas_faltantes = COLUMNAS_REQUERIDAS - set(df_raw.columns.str.upper())
+
+    if columnas_faltantes:
+        st.error(
+            f"El archivo **{_archivo.name}** no tiene el formato de Supermercados Holi. "
+            f"Columnas faltantes: `{', '.join(sorted(columnas_faltantes))}`"
+        )
+        st.info("El archivo debe contener: SUCURSAL, PRODUCTO, CATEGORIA, FECHA, CANTIDAD, PRECIO_UNITARIO, TOTAL_VENTA, STOCK_ACTUAL, METODO_PAGO")
+        st.stop()
+
+    with st.spinner(f"Procesando {_archivo.name}..."):
+        df_sucio = df_raw.copy()
+        df_sucio.columns = df_sucio.columns.str.upper()
+        df, _etl_log = aplicar_etl(df_sucio)
+        df["FECHA"] = pd.to_datetime(df["FECHA"])
+    _nombre = _archivo.name if len(_archivo.name) <= 18 else _archivo.name[:15] + "..."
+    _fuente = f"Excel: {_nombre}"
+
+else:
+    # Datos cargados desde el historial de Neon
+    df = st.session_state["df_neon"].copy()
+    _nombre_neon = st.session_state["fuente_neon"] or "Neon"
+    _fuente = f"Neon: {_nombre_neon[:15]}"
+
 _registros = f"{len(df):,}"
 
 # ── HERO ──────────────────────────────────────────────────────────
@@ -447,8 +475,8 @@ if categorias_sel:
 
 kpis = calcular_kpis(df)
 
-st.subheader("Proceso ETL (Limpieza y Transformación)")
 if df_sucio is not None:
+    st.subheader("Proceso ETL (Limpieza y Transformación)")
     diagnostico = diagnosticar_dataset(df_sucio)
 
     with st.expander("Ver diagnóstico del dataset original (datos sucios)", expanded=True):
@@ -505,17 +533,32 @@ if df_sucio is not None:
     st.markdown("<div class='alerta-ok'>ETL completado — datos listos para análisis</div>",
                 unsafe_allow_html=True)
 
-    st.markdown("#### Guardar en base de datos")
-    col_g1, col_g2 = st.columns([2, 1])
+    st.markdown("#### Exportar y guardar")
+    col_g1, col_g2, col_g3 = st.columns(3)
     with col_g1:
-        st.markdown("Guarda los datos limpios en Neon PostgreSQL para mantener el historial de cargas.")
+        st.markdown("Descarga el dataset ya limpio en formato Excel.")
     with col_g2:
+        import io
+        _buf_excel = io.BytesIO()
+        df.to_excel(_buf_excel, index=False, engine="openpyxl")
+        _buf_excel.seek(0)
+        _nombre_limpio = _archivo.name.replace(".xlsx", "_LIMPIO.xlsx").replace(".xls", "_LIMPIO.xlsx")
+        st.download_button(
+            label="Descargar Excel limpio",
+            data=_buf_excel,
+            file_name=_nombre_limpio,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+    with col_g3:
         if st.button("Guardar en Neon", use_container_width=True):
             with st.spinner("Guardando en Neon PostgreSQL..."):
                 nuevos = guardar_en_neon(df, _archivo.name)
             st.success(f"{nuevos:,} registros nuevos guardados en Neon.")
-else:
-    st.info("Archivo de datos originales no encontrado.")
+            st.rerun()
+
+elif st.session_state["df_neon"] is not None:
+    st.info(f"Datos cargados desde Neon · {st.session_state['fuente_neon']}")
 
 # ── DASHBOARD ─────────────────────────────────────────────────────
 st.markdown("---")
@@ -741,7 +784,7 @@ elif menu == "📄  Reportes":
 # ── HISTORIAL ─────────────────────────────────────────────────────
 elif menu == "📁  Historial":
     st.markdown("### Historial de Cargas")
-    st.markdown("Registro de todos los archivos Excel cargados al sistema.")
+    st.markdown("Selecciona cualquier carga anterior para analizarla en el dashboard.")
 
     try:
         historial = obtener_historial()
@@ -749,7 +792,24 @@ elif menu == "📁  Historial":
             st.info("Aún no se han registrado cargas. Sube un Excel y guárdalo en Neon para ver el historial.")
         else:
             st.metric("Total de cargas registradas", len(historial))
-            st.dataframe(historial, use_container_width=True, hide_index=True)
+            for _i, _hrow in historial.iterrows():
+                _activo = st.session_state["historial_activo"] == str(_hrow["Archivo"])
+                with st.container(border=True):
+                    c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
+                    c1.markdown(f"**{str(_hrow['Archivo'])}**")
+                    c2.markdown(f"{int(_hrow['Registros nuevos']):,} registros")
+                    c3.markdown(f"{str(_hrow['Desde'])} → {str(_hrow['Hasta'])}")
+                    with c4:
+                        if _activo:
+                            st.markdown("<div style='color:#D35400;font-weight:700;padding:6px 0'>✓ Activo</div>", unsafe_allow_html=True)
+                        else:
+                            if st.button("Cargar", key=f"main_hist_{_i}", use_container_width=True):
+                                with st.spinner(f"Cargando {str(_hrow['Archivo'])[:20]}..."):
+                                    _df_cargado = cargar_datos_por_periodo(_hrow["Desde"], _hrow["Hasta"])
+                                st.session_state["df_neon"] = _df_cargado
+                                st.session_state["fuente_neon"] = str(_hrow["Archivo"])
+                                st.session_state["historial_activo"] = str(_hrow["Archivo"])
+                                st.rerun()
     except Exception as e:
         st.error(f"Error al cargar el historial: {e}")
 

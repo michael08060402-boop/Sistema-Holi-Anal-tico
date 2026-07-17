@@ -1,6 +1,7 @@
 import os
 import hashlib
 import pandas as pd
+from psycopg2.extras import execute_values
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 
@@ -56,14 +57,20 @@ def _crear_historial_si_no_existe(engine):
         """))
 
 
+def _migrar_esquema(engine):
+    with engine.begin() as conn:
+        conn.execute(text(
+            "ALTER TABLE fact_ventas ALTER COLUMN id_venta TYPE TEXT"
+        ))
+
+
 def guardar_en_neon(df, nombre_archivo):
-    """
-    Carga un DataFrame limpio al esquema estrella de Neon
-    y registra la carga en el historial.
-    Retorna la cantidad de registros nuevos insertados.
-    """
     engine = get_engine()
     _crear_historial_si_no_existe(engine)
+    try:
+        _migrar_esquema(engine)
+    except Exception:
+        pass
 
     df = df.copy()
     df["FECHA"] = pd.to_datetime(df["FECHA"])
@@ -73,7 +80,7 @@ def guardar_en_neon(df, nombre_archivo):
     dias  = {0:"Lunes",1:"Martes",2:"Miércoles",3:"Jueves",
              4:"Viernes",5:"Sábado",6:"Domingo"}
 
-    # DIM_SUCURSAL
+    # DIMENSIONES PEQUEÑAS — row-by-row está bien (≤ 50 filas)
     with engine.begin() as conn:
         for _, row in df[["SUCURSAL"]].drop_duplicates().iterrows():
             conn.execute(text("""
@@ -86,7 +93,6 @@ def guardar_en_neon(df, nombre_archivo):
         "SELECT nombre, id_sucursal FROM dim_sucursal", engine
     ).values.T))
 
-    # DIM_CATEGORIA
     with engine.begin() as conn:
         for _, row in df[["CATEGORIA"]].drop_duplicates().iterrows():
             conn.execute(text("""
@@ -98,7 +104,6 @@ def guardar_en_neon(df, nombre_archivo):
         "SELECT nombre, id_categoria FROM dim_categoria", engine
     ).values.T))
 
-    # DIM_PRODUCTO
     with engine.begin() as conn:
         for _, row in df[["PRODUCTO","CATEGORIA"]].drop_duplicates(subset="PRODUCTO").iterrows():
             conn.execute(text("""
@@ -110,7 +115,6 @@ def guardar_en_neon(df, nombre_archivo):
         "SELECT nombre, id_producto FROM dim_producto", engine
     ).values.T))
 
-    # DIM_METODO_PAGO
     with engine.begin() as conn:
         for _, row in df[["METODO_PAGO"]].drop_duplicates().iterrows():
             conn.execute(text("""
@@ -122,66 +126,56 @@ def guardar_en_neon(df, nombre_archivo):
         "SELECT nombre, id_metodo FROM dim_metodo_pago", engine
     ).values.T))
 
-    # DIM_FECHA
+    # DIM_FECHA — bulk insert (puede tener 700+ fechas únicas)
+    fecha_tuples = []
+    for fecha in df["FECHA"].dt.date.unique():
+        f = pd.Timestamp(fecha)
+        fecha_tuples.append((
+            fecha, f.year, f.month, meses[f.month],
+            f.quarter, int(f.isocalendar().week), dias[f.dayofweek],
+        ))
+
     with engine.begin() as conn:
-        for fecha in df["FECHA"].dt.date.unique():
-            f = pd.Timestamp(fecha)
-            conn.execute(text("""
+        raw = conn.connection
+        with raw.cursor() as cur:
+            execute_values(cur, """
                 INSERT INTO dim_fecha
                     (id_fecha, anio, mes, nombre_mes, trimestre, semana, dia_semana)
-                VALUES
-                    (:id_fecha,:anio,:mes,:nombre_mes,:trimestre,:semana,:dia_semana)
+                VALUES %s
                 ON CONFLICT DO NOTHING
-            """), {
-                "id_fecha": fecha, "anio": f.year, "mes": f.month,
-                "nombre_mes": meses[f.month], "trimestre": f.quarter,
-                "semana": f.isocalendar().week, "dia_semana": dias[f.dayofweek],
-            })
+            """, fecha_tuples)
 
-    # FACT_VENTAS — inserción en lote
+    # FACT_VENTAS — IDs vectoriales + bulk insert con execute_values
     if "ID_VENTA" in df.columns:
         df["_id"] = df["ID_VENTA"].astype(str)
     else:
-        df["_id"] = (df.reset_index()["index"].astype(str)
-                     + df["FECHA"].dt.date.astype(str)
-                     + df["SUCURSAL"] + df["PRODUCTO"]
-                     + df["CANTIDAD"].astype(str))
-        df["_id"] = df["_id"].apply(
-            lambda x: hashlib.md5(x.encode()).hexdigest()[:24]
-        )
+        base = (df.reset_index()["index"].astype(str)
+                + df["FECHA"].dt.date.astype(str)
+                + df["SUCURSAL"] + df["PRODUCTO"]
+                + df["CANTIDAD"].astype(str))
+        df["_id"] = [hashlib.md5(x.encode()).hexdigest()[:24] for x in base]
 
     df["_id_sucursal"] = df["SUCURSAL"].map(suc_map)
     df["_id_producto"]  = df["PRODUCTO"].map(prod_map)
     df["_id_metodo"]    = df["METODO_PAGO"].map(met_map)
     df["_fecha"]        = df["FECHA"].dt.date
 
-    registros = [
-        {
-            "id_venta":    row["_id"],
-            "fecha":       row["_fecha"],
-            "id_sucursal": row["_id_sucursal"],
-            "id_producto": row["_id_producto"],
-            "id_metodo":   row["_id_metodo"],
-            "cantidad":    int(row["CANTIDAD"]),
-            "precio_unit": float(row["PRECIO_UNITARIO"]),
-            "total_venta": float(row["TOTAL_VENTA"]),
-            "stock_actual":int(row["STOCK_ACTUAL"]),
-        }
-        for _, row in df.iterrows()
-    ]
+    cols = ["_id", "_fecha", "_id_sucursal", "_id_producto", "_id_metodo",
+            "CANTIDAD", "PRECIO_UNITARIO", "TOTAL_VENTA", "STOCK_ACTUAL"]
+    fact_tuples = list(df[cols].itertuples(index=False, name=None))
 
     count_antes = pd.read_sql("SELECT COUNT(*) AS n FROM fact_ventas", engine).iloc[0, 0]
 
     with engine.begin() as conn:
-        conn.execute(text("""
-            INSERT INTO fact_ventas
-                (id_venta, fecha, id_sucursal, id_producto,
-                 id_metodo, cantidad, precio_unit, total_venta, stock_actual)
-            VALUES
-                (:id_venta,:fecha,:id_sucursal,:id_producto,
-                 :id_metodo,:cantidad,:precio_unit,:total_venta,:stock_actual)
-            ON CONFLICT DO NOTHING
-        """), registros)
+        raw = conn.connection
+        with raw.cursor() as cur:
+            execute_values(cur, """
+                INSERT INTO fact_ventas
+                    (id_venta, fecha, id_sucursal, id_producto,
+                     id_metodo, cantidad, precio_unit, total_venta, stock_actual)
+                VALUES %s
+                ON CONFLICT DO NOTHING
+            """, fact_tuples, page_size=500)
 
     count_despues = pd.read_sql("SELECT COUNT(*) AS n FROM fact_ventas", engine).iloc[0, 0]
     insertados = int(count_despues - count_antes)
@@ -205,6 +199,35 @@ def guardar_en_neon(df, nombre_archivo):
         })
 
     return insertados
+
+
+def cargar_datos_por_periodo(fecha_inicio, fecha_fin):
+    engine = get_engine()
+    q = text("""
+        SELECT
+            fv.id_venta          AS "ID_VENTA",
+            df.id_fecha          AS "FECHA",
+            ds.nombre            AS "SUCURSAL",
+            dp.nombre            AS "PRODUCTO",
+            dc.nombre            AS "CATEGORIA",
+            fv.cantidad          AS "CANTIDAD",
+            fv.precio_unit       AS "PRECIO_UNITARIO",
+            fv.total_venta       AS "TOTAL_VENTA",
+            fv.stock_actual      AS "STOCK_ACTUAL",
+            dmp.nombre           AS "METODO_PAGO"
+        FROM fact_ventas fv
+        JOIN dim_fecha       df  ON fv.fecha       = df.id_fecha
+        JOIN dim_sucursal    ds  ON fv.id_sucursal = ds.id_sucursal
+        JOIN dim_producto    dp  ON fv.id_producto = dp.id_producto
+        JOIN dim_categoria   dc  ON dp.id_categoria = dc.id_categoria
+        JOIN dim_metodo_pago dmp ON fv.id_metodo   = dmp.id_metodo
+        WHERE df.id_fecha BETWEEN :inicio AND :fin
+        ORDER BY df.id_fecha
+    """)
+    with engine.connect() as conn:
+        df = pd.read_sql(q, conn, params={"inicio": str(fecha_inicio), "fin": str(fecha_fin)})
+    df["FECHA"] = pd.to_datetime(df["FECHA"])
+    return df
 
 
 def obtener_historial():
